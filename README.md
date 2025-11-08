@@ -4,7 +4,7 @@ Aplikasi web admin dashboard untuk melakukan segmentasi pelanggan konveksi berda
 
 ## 📋 Spesifikasi
 
-- **Framework**: Laravel 111
+- **Framework**: Laravel 11
 - **Database**: MySQL
 - **Frontend**: HTML, CSS (Bootstrap), jQuery
 - **Clustering**: PHP-ML (K-Means Algorithm)
