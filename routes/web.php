@@ -37,6 +37,6 @@ Route::middleware('auth')->group(function () {
 });
 
 // Fallback
-Route::fallback(function () {
-    return redirect()->route('login');
-});
+// Route::fallback(function () {
+//     return redirect()->route('login');
+// });

@@ -1,8 +1,6 @@
-@extends('layouts.app')
+<?php $__env->startSection('title', 'Hasil Segmentasi - Hypo Studio'); ?>
 
-@section('title', 'Hasil Segmentasi - Hypo Studio')
-
-@section('css')
+<?php $__env->startSection('css'); ?>
 <style>
     .chart-section {
         transition: opacity 0.3s ease-in-out;
@@ -20,9 +18,9 @@
         color: white;
     }
 </style>
-@endsection
+<?php $__env->stopSection(); ?>
 
-@section('content')
+<?php $__env->startSection('content'); ?>
 <div class="container-fluid">
     <div class="row mb-4">
         <div class="col-md-6">
@@ -42,7 +40,7 @@
                     <i class="fas fa-box"></i> Produk
                 </button>
             </div>
-            <a href="{{ url('/clustering') }}" class="btn btn-secondary">
+            <a href="<?php echo e(url('/clustering')); ?>" class="btn btn-secondary">
                 <i class="fas fa-arrow-left"></i> Kembali
             </a>
         </div>
@@ -51,27 +49,16 @@
     <div class="row mb-3">
         <div class="col-md-12 text-end">
                 <div class="btn-group me-2">
-                    <button class="btn btn-outline-secondary" type="button" d{{--bs-toggle="collapse" data-bs-target="#debugCluster" aria-expanded="false" aria-controls="#debugCluster">
-                        Tampilkan Data $cluster (debug)
-                    </button>
-                </div>
-
-                <div class="collapse mt-2" id="debugCluster">
-                    <div class="card card-body">
-                        <strong>Cluster (array):</strong>
-                        <pre class="small mb-0">{{ json_encode($cluster->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
-                    </div>
-                </div>
-  --}}FoundException) --}} 
-                <a href="{{ url('/clustering/export/' . $cluster->id . '?format=xlsx') }}" class="btn btn-success">Export XLSX</a>
-                <a href="{{ url('/clustering/export/' . $cluster->id . '?format=csv') }}" class="btn btn-outline-secondary">Export CSV</a>
+                    <button class="btn btn-outline-secondary" type="button" dFoundException) --}} 
+                <a href="<?php echo e(url('/clustering/export/' . $cluster->id . '?format=xlsx')); ?>" class="btn btn-success">Export XLSX</a>
+                <a href="<?php echo e(url('/clustering/export/' . $cluster->id . '?format=csv')); ?>" class="btn btn-outline-secondary">Export CSV</a>
             
             
-                {{-- fallback URL jika route bernama tidak ditemukan --}}
-                <a href="{{ url('/clustering/pdf/' . $cluster->id) }}" class="btn btn-outline-dark">Download PDF</a>
+                
+                <a href="<?php echo e(url('/clustering/pdf/' . $cluster->id)); ?>" class="btn btn-outline-dark">Download PDF</a>
             
-                {{-- fallback jika named route tidak ditemukan --}}
-                <a href="{{ url('/clustering/rerun/' . $cluster->id) }}" class="btn btn-warning">Rerun Analisis (simpan params)</a>
+                
+                <a href="<?php echo e(url('/clustering/rerun/' . $cluster->id)); ?>" class="btn btn-warning">Rerun Analisis (simpan params)</a>
             
         </div>
     </div>
@@ -79,68 +66,72 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="alert alert-info">
-                <strong>Analisis:</strong> {{ $cluster->name }} | 
-                <strong>Tanggal:</strong> {{ optional($cluster->analysis_date)->format('d M Y H:i') ?? 'N/A' }}
+                <strong>Analisis:</strong> <?php echo e($cluster->name); ?> | 
+                <strong>Tanggal:</strong> <?php echo e(optional($cluster->analysis_date)->format('d M Y H:i') ?? 'N/A'); ?>
+
             </div>
         </div>
     </div>
 
     <!-- Statistics (per-feature per cluster) -->
     <div class="row mb-4">
-        @php
+        <?php
             $params = is_string($cluster->params) ? json_decode($cluster->params, true) : ($cluster->params ?? []);
             $defaultFeatures = ['recency','frequency','spending'];
-        @endphp
-        @for ($i = 1; $i <= $cluster->k_value; $i++)
-            @php
+        ?>
+        <?php for($i = 1; $i <= $cluster->k_value; $i++): ?>
+            <?php
                 $label = $statistics[$i]['label'] ?? null;
                 $count = $statistics[$i]['count'] ?? 0;
                 $features = $params['features'] ?? $defaultFeatures;
                 $statsForI = $statistics[$i] ?? [];
-            @endphp
+            ?>
             <div class="col-md-4">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <h5 class="card-title">
-                            Kelompok {{ $i }}
-                            <span class="cluster-label" data-cluster="{{ $i }}">
-                                @if($label) - {{ $label }} @endif
+                            Kelompok <?php echo e($i); ?>
+
+                            <span class="cluster-label" data-cluster="<?php echo e($i); ?>">
+                                <?php if($label): ?> - <?php echo e($label); ?> <?php endif; ?>
                             </span>
                             <button type="button" class="btn btn-sm btn-outline-secondary ms-2 edit-label-btn" 
-                                    data-cluster="{{ $i }}" 
-                                    data-current="{{ $label ?? '' }}">
+                                    data-cluster="<?php echo e($i); ?>" 
+                                    data-current="<?php echo e($label ?? ''); ?>">
                                 <i class="fas fa-edit"></i>
                             </button>
                         </h5>
                         <hr>
                         <p class="mb-2"><strong>Jumlah Pelanggan:</strong><br>
-                            <span class="badge bg-primary" style="font-size: 14px;">{{ $count }}</span>
+                            <span class="badge bg-primary" style="font-size: 14px;"><?php echo e($count); ?></span>
                         </p>
-                        @foreach($features as $f)
-                            @php
+                        <?php $__currentLoopData = $features; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $f): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
+                            <?php
                                 $key = "avg_{$f}";
                                 $val = $statsForI[$key] ?? ($statsForI['averages'][$f] ?? null);
-                            @endphp
-                            <p class="mb-2"><strong>Rata-rata {{ ucfirst($f) }}:</strong><br>
-                                @if(is_null($val))
+                            ?>
+                            <p class="mb-2"><strong>Rata-rata <?php echo e(ucfirst($f)); ?>:</strong><br>
+                                <?php if(is_null($val)): ?>
                                     -
-                                @else
-                                    @if(in_array($f, ['spending']) || Str::contains($f, 'spend'))
-                                        Rp {{ number_format($val, 0, ',', '.') }}
-                                    @elseif($f === 'recency')
-                                        {{ number_format($val, 2) }} hari
-                                    @elseif($f === 'frequency')
-                                        {{ number_format($val, 2) }} transaksi
-                                    @else
-                                        {{ is_numeric($val) ? number_format($val, 2) : $val }}
-                                    @endif
-                                @endif
+                                <?php else: ?>
+                                    <?php if(in_array($f, ['spending']) || Str::contains($f, 'spend')): ?>
+                                        Rp <?php echo e(number_format($val, 0, ',', '.')); ?>
+
+                                    <?php elseif($f === 'recency'): ?>
+                                        <?php echo e(number_format($val, 2)); ?> hari
+                                    <?php elseif($f === 'frequency'): ?>
+                                        <?php echo e(number_format($val, 2)); ?> transaksi
+                                    <?php else: ?>
+                                        <?php echo e(is_numeric($val) ? number_format($val, 2) : $val); ?>
+
+                                    <?php endif; ?>
+                                <?php endif; ?>
                             </p>
-                        @endforeach
+                        <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?>
                     </div>
                 </div>
             </div>
-        @endfor
+        <?php endfor; ?>
     </div>
 
     <!-- Centroids -->
@@ -151,30 +142,30 @@
                     <h5 class="mb-0">Nilai Tengah Kelompok (rata-rata fitur per kelompok)</h5>
                 </div>
                 <div class="card-body">
-                    @php
+                    <?php
                         $centroids = $params['centroids'] ?? [];
                         $featuresList = $params['features'] ?? ['recency','frequency','spending'];
-                    @endphp
-                    @if(!empty($centroids))
+                    ?>
+                    <?php if(!empty($centroids)): ?>
                         <div class="table-responsive">
                             <table class="table table-bordered">
                                 <thead>
                                     <tr>
                                         <th>Kelompok</th>
-                                        @foreach($featuresList as $f)
-                                            <th>{{ ucfirst($f) }}</th>
-                                        @endforeach
+                                        <?php $__currentLoopData = $featuresList; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $f): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
+                                            <th><?php echo e(ucfirst($f)); ?></th>
+                                        <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($centroids as $idx => $cent)
+                                    <?php $__currentLoopData = $centroids; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $idx => $cent): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
                                         <tr>
-                                            <td>{{ $idx + 1 }}</td>
-                                            @foreach($cent as $val)
-                                                <td>{{ is_numeric($val) ? number_format($val, 2) : $val }}</td>
-                                            @endforeach
+                                            <td><?php echo e($idx + 1); ?></td>
+                                            <?php $__currentLoopData = $cent; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $val): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
+                                                <td><?php echo e(is_numeric($val) ? number_format($val, 2) : $val); ?></td>
+                                            <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?>
                                         </tr>
-                                    @endforeach
+                                    <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?>
                                 </tbody>
                             </table>
                         </div>
@@ -182,9 +173,9 @@
                         <div class="mt-3">
                             <canvas id="centroidRadar" height="160"></canvas>
                         </div>
-                    @else
+                    <?php else: ?>
                         <p class="text-muted">Centroid tidak tersedia.</p>
-                    @endif
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -212,35 +203,35 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @forelse ($cluster->clusterMembers as $key => $member)
-                                    @php
+                                <?php $__empty_1 = true; $__currentLoopData = $cluster->clusterMembers; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $key => $member): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?>
+                                    <?php
                                         $clusterNames = ['Pelanggan Loyal', 'Pelanggan Reguler', 'Pelanggan Sporadis', 'Pelanggan Baru', 'Pelanggan VIP'];
-                                    @endphp
+                                    ?>
                                     <tr>
-                                        <td>{{ $key + 1 }}</td>
+                                        <td><?php echo e($key + 1); ?></td>
                                         <td>
-                                            <strong>{{ $member->customer->name ?? '-' }}</strong>
+                                            <strong><?php echo e($member->customer->name ?? '-'); ?></strong>
                                         </td>
                                         <td>
-                                            <span class="badge bg-secondary">Kelompok {{ $member->cluster_number ?? '-' }}</span>
-                                            @if(!empty($statistics[$member->cluster_number]['label']))
-                                                <br><small>{{ $statistics[$member->cluster_number]['label'] }}</small>
-                                            @endif
+                                            <span class="badge bg-secondary">Kelompok <?php echo e($member->cluster_number ?? '-'); ?></span>
+                                            <?php if(!empty($statistics[$member->cluster_number]['label'])): ?>
+                                                <br><small><?php echo e($statistics[$member->cluster_number]['label']); ?></small>
+                                            <?php endif; ?>
                                         </td>
                                         <td>
-                                            <span class="badge bg-info">{{ $member->frequency }}</span>
+                                            <span class="badge bg-info"><?php echo e($member->frequency); ?></span>
                                         </td>
                                         <td>
-                                            <strong>Rp {{ number_format($member->total_spent, 0, ',', '.') }}</strong>
+                                            <strong>Rp <?php echo e(number_format($member->total_spent, 0, ',', '.')); ?></strong>
                                         </td>
                                     </tr>
-                                @empty
+                                <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?>
                                     <tr>
                                         <td colspan="5" class="text-center text-muted py-3">
                                             Tidak ada data
                                         </td>
                                     </tr>
-                                @endforelse
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -280,29 +271,30 @@
 
     <!-- Product Type Distribution -->
     <div class="row mt-4">
-        @for ($i = 1; $i <= $cluster->k_value; $i++)
+        <?php for($i = 1; $i <= $cluster->k_value; $i++): ?>
             <div class="col-md-6 mb-4">
                 <div class="card border-0 shadow-sm">
                     <div class="card-header bg-white border-bottom">
                         <h5 class="mb-0">
-                            <i class="fas fa-chart-pie"></i> Distribusi Jenis Produk - Kelompok {{ $i }}
+                            <i class="fas fa-chart-pie"></i> Distribusi Jenis Produk - Kelompok <?php echo e($i); ?>
+
                         </h5>
                     </div>
                     <div class="card-body">
-                        <canvas id="productTypeChart{{ $i }}" height="80"></canvas>
+                        <canvas id="productTypeChart<?php echo e($i); ?>" height="80"></canvas>
                     </div>
                 </div>
             </div>
-        @endfor
+        <?php endfor; ?>
     </div>
 
     <!-- Actions -->
     <div class="row mt-4">
         <div class="col-md-12">
-            <a href="{{ url('/clustering') }}" class="btn btn-secondary">
+            <a href="<?php echo e(url('/clustering')); ?>" class="btn btn-secondary">
                 <i class="fas fa-arrow-left"></i> Kembali ke Analisis
             </a>
-            <a href="{{ url('/clustering/history') }}" class="btn btn-info">
+            <a href="<?php echo e(url('/clustering/history')); ?>" class="btn btn-info">
                 <i class="fas fa-history"></i> Riwayat
             </a>
         </div>
@@ -337,11 +329,11 @@
             </div>
         </div>
     </div>
-@endsection
+<?php $__env->stopSection(); ?>
 
-@section('js')
+<?php $__env->startSection('js'); ?>
 <script
-    @php
+    <?php
         // Guard k_value and prepare chart data to avoid division by zero
         $k = (int) ($cluster->k_value ?? 0);
         if ($k <= 0) {
@@ -361,16 +353,16 @@
             $avgFreqArr[] = (float) ($statistics[$i]['avg_frequency'] ?? 0);
             $avgSpendingArr[] = (float) ($statistics[$i]['avg_spending'] ?? 0);
         }
-    @endphp
+    ?>
     // Cluster Distribution Chart
     var distributionCtx = document.getElementById('clusterDistribution').getContext('2d');
     new Chart(distributionCtx, {
         type: 'bar',
         data: {
-            labels: @json($labels),
+            labels: <?php echo json_encode($labels, 15, 512) ?>,
             datasets: [{
                 label: 'Jumlah Pelanggan',
-                data: @json($distributionCounts),
+                data: <?php echo json_encode($distributionCounts, 15, 512) ?>,
                 backgroundColor: 'rgba(102, 126, 234, 0.5)',
                 borderColor: 'rgba(102, 126, 234, 1)',
                 borderWidth: 2
@@ -392,14 +384,14 @@
     new Chart(multiFeatureCtx, {
         type: 'line',
         data: {
-            labels: @json($labels),
+            labels: <?php echo json_encode($labels, 15, 512) ?>,
             datasets: [
                 {
 
                 // Centroid Radar Chart
                 (function(){
-                    var centroids = @json($params['centroids'] ?? []);
-                    var features = @json($featuresList ?? []);
+                    var centroids = <?php echo json_encode($params['centroids'] ?? [], 15, 512) ?>;
+                    var features = <?php echo json_encode($featuresList ?? [], 15, 512) ?>;
                     // Centroid Radar Chart
                     if (centroids && centroids.length) {
                         var datasets = centroids.map(function(c, i){
@@ -421,7 +413,7 @@
                     }
                 })();
                     label: 'Rata-rata ' + (features[0] ? (features[0].charAt(0).toUpperCase()+features[0].slice(1)) : 'Feature 1') + (features[0] === 'recency' ? ' (hari)' : (features[0] === 'spending' ? ' (Rp)' : '')),
-                    data: @json($avgRecencyArr),
+                    data: <?php echo json_encode($avgRecencyArr, 15, 512) ?>,
                     borderColor: 'rgba(255, 99, 132, 1)',
                     backgroundColor: 'rgba(255, 99, 132, 0.1)',
                     yAxisID: 'yRecency',
@@ -430,7 +422,7 @@
                 },
                 {
                     label: 'Rata-rata ' + (features[1] ? (features[1].charAt(0).toUpperCase()+features[1].slice(1)) : 'Feature 2') + (features[1] === 'recency' ? ' (hari)' : (features[1] === 'spending' ? ' (Rp)' : '')),
-                    data: @json($avgFreqArr),
+                    data: <?php echo json_encode($avgFreqArr, 15, 512) ?>,
                     borderColor: 'rgba(54, 162, 235, 1)',
                     backgroundColor: 'rgba(54, 162, 235, 0.1)',
                     yAxisID: 'yFreq',
@@ -439,7 +431,7 @@
                 },
                 {
                     label: 'Rata-rata ' + (features[2] ? (features[2].charAt(0).toUpperCase()+features[2].slice(1)) : 'Feature 3') + (features[2] === 'recency' ? ' (hari)' : (features[2] === 'spending' ? ' (Rp)' : '')),
-                    data: @json($avgSpendingArr),
+                    data: <?php echo json_encode($avgSpendingArr, 15, 512) ?>,
                     borderColor: 'rgba(75, 192, 192, 1)',
                     backgroundColor: 'rgba(75, 192, 192, 0.1)',
                     yAxisID: 'yMoney',
@@ -481,21 +473,21 @@
     });
 
     // Product Type Distribution Charts
-    @php
+    <?php
         $productTypeData = $productTypes ?? [];
-    @endphp
-    @for ($i = 1; $i <= $k; $i++)
-        @php
+    ?>
+    <?php for($i = 1; $i <= $k; $i++): ?>
+        <?php
             $types = array_keys($productTypeData[$i] ?? []);
             $percentages = array_values($productTypeData[$i] ?? []);
-        @endphp
-        var productTypeCtx{{ $i }} = document.getElementById('productTypeChart{{ $i }}').getContext('2d');
-        new Chart(productTypeCtx{{ $i }}, {
+        ?>
+        var productTypeCtx<?php echo e($i); ?> = document.getElementById('productTypeChart<?php echo e($i); ?>').getContext('2d');
+        new Chart(productTypeCtx<?php echo e($i); ?>, {
             type: 'doughnut',
             data: {
-                labels: @json($types),
+                labels: <?php echo json_encode($types, 15, 512) ?>,
                 datasets: [{
-                    data: @json($percentages),
+                    data: <?php echo json_encode($percentages, 15, 512) ?>,
                     backgroundColor: [
                         'rgba(255, 99, 132, 0.8)',
                         'rgba(54, 162, 235, 0.8)',
@@ -534,7 +526,7 @@
                 }
             }
         });
-    @endfor
+    <?php endfor; ?>
 
     // Label editing functionality
     document.addEventListener('DOMContentLoaded', function() {
@@ -542,7 +534,7 @@
         const editClusterNumber = document.getElementById('editClusterNumber');
         const editLabel = document.getElementById('editLabel');
         const saveLabelBtn = document.getElementById('saveLabelBtn');
-        const clusterId = {{ $cluster->id }};
+        const clusterId = <?php echo e($cluster->id); ?>;
 
         document.querySelectorAll('.edit-label-btn').forEach(btn => {
             btn.addEventListener('click', function() {
@@ -558,7 +550,7 @@
             const formData = new FormData();
             formData.append('cluster_number', editClusterNumber.value);
             formData.append('label', editLabel.value);
-            formData.append('_token', '{{ csrf_token() }}');
+            formData.append('_token', '<?php echo e(csrf_token()); ?>');
 
             fetch(`/clustering/${clusterId}/update-label`, {
                 method: 'POST',
@@ -606,4 +598,6 @@
         });
     });
 </script>
-@endsection
+<?php $__env->stopSection(); ?>
+
+<?php echo $__env->make('layouts.app', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?><?php /**PATH C:\Users\asoy9\OneDrive\Documents\GitHub\hypo-studio-web-app\resources\views/clustering/results.blade.php ENDPATH**/ ?>

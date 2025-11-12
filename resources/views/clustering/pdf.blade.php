@@ -19,15 +19,19 @@
     </div>
 
     <h4>Ringkasan per Cluster</h4>
+    @php
+        $params = is_string($cluster->params) ? json_decode($cluster->params, true) : ($cluster->params ?? []);
+        $features = $params['features'] ?? ['recency','frequency','spending'];
+    @endphp
     <table>
         <thead>
             <tr>
                 <th>Cluster</th>
                 <th>Label</th>
                 <th>Jumlah</th>
-                <th>Avg Recency (hari)</th>
-                <th>Avg Frequency</th>
-                <th>Avg Spending (Rp)</th>
+                @foreach($features as $f)
+                    <th>Avg {{ ucfirst($f) }}@if($f === 'recency') (hari)@elseif(in_array($f, ['spending'])) (Rp)@endif</th>
+                @endforeach
             </tr>
         </thead>
         <tbody>
@@ -36,9 +40,23 @@
                     <td>{{ $i }}</td>
                     <td>{{ $statistics[$i]['label'] ?? '-' }}</td>
                     <td>{{ $statistics[$i]['count'] ?? 0 }}</td>
-                    <td>{{ number_format($statistics[$i]['avg_recency'] ?? 0,2) }}</td>
-                    <td>{{ number_format($statistics[$i]['avg_frequency'] ?? 0,2) }}</td>
-                    <td>Rp {{ number_format($statistics[$i]['avg_spending'] ?? 0, 0, ',', '.') }}</td>
+                    @foreach($features as $f)
+                        @php
+                            $key = "avg_{$f}";
+                            $val = $statistics[$i][$key] ?? ($statistics[$i]['averages'][$f] ?? 0);
+                        @endphp
+                        <td>
+                            @if(is_null($val))
+                                -
+                            @elseif($f === 'recency')
+                                {{ number_format($val, 2) }}
+                            @elseif(in_array($f, ['spending']))
+                                Rp {{ number_format($val, 0, ',', '.') }}
+                            @else
+                                {{ is_numeric($val) ? number_format($val, 2) : $val }}
+                            @endif
+                        </td>
+                    @endforeach
                 </tr>
             @endfor
         </tbody>

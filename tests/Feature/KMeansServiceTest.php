@@ -35,8 +35,8 @@ class KMeansServiceTest extends TestCase
             }
         }
 
-        $svc = new KMeansService();
-        $res = $svc->analyze(['k' => 2]);
+    $svc = new KMeansService();
+    $res = $svc->analyze(['k' => 2, 'features' => ['orders']]);
 
         $this->assertArrayHasKey('mapping', $res);
         $this->assertCount(10, $res['customerIds']);

@@ -79,9 +79,10 @@ class ClusteringWorkflowTest extends TestCase
         $response->assertStatus(200);
         $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
-        $response = $this->get("/clustering/export/{$cluster->id}?format=csv");
-        $response->assertStatus(200);
-        $response->assertHeader('content-type', 'text/csv');
+    $response = $this->get("/clustering/export/{$cluster->id}?format=csv");
+    $response->assertStatus(200);
+    // Accept content-type that contains text/csv (charset may be present)
+    $this->assertStringContainsString('text/csv', strtolower($response->headers->get('content-type')));
 
         $response = $this->get("/clustering/pdf/{$cluster->id}");
         $response->assertStatus(200);

@@ -18,9 +18,13 @@ class KMeansService
      * Analyze customers and run KMeans clustering.
      * Options:
      *  - k: int (required)
-     *  - features: array of feature keys (default ['recency','frequency','monetary'])
+     *  - features: array of attribute/relation names to use as numeric features (required)
+     *      Example: ['lifetime_value','orders_count'] or any numeric Customer attribute.
      *  - seed: int|null
      *  - n_init: number of init runs (not used by php-ml KMeans but accepted)
+     *
+    * Note: This service is feature-driven and does not compute domain-specific features automatically.
+    * Callers must supply the desired feature names (e.g. 'orders', 'lifetime_value', 'spending') via the `features` option.
      *
      * Returns array with mapping, centroids, inertia, raw features, params
      */
@@ -31,11 +35,15 @@ class KMeansService
             throw new \InvalidArgumentException('Parameter k harus diberikan dan > 0');
         }
 
-        $features = $options['features'] ?? ['recency', 'frequency', 'monetary'];
+        $features = $options['features'] ?? [];
         $seed = $options['seed'] ?? null;
 
-        // Ambil data pelanggan
-        $customers = Customer::with('orders')->get();
+        if (empty($features) || !is_array($features)) {
+            throw new \InvalidArgumentException('Parameter `features` harus diberikan sebagai array nama atribut/relasi pada model Customer');
+        }
+
+        // Ambil data pelanggan (no longer eagerly loading orders by default)
+        $customers = Customer::all();
         if ($customers->isEmpty()) {
             throw new \Exception('Data pelanggan tidak ada');
         }
@@ -44,28 +52,35 @@ class KMeansService
         $customerIds = [];
 
         foreach ($customers as $customer) {
-            // prepare base RFM
-            $frequency = (int) $customer->orders()->count();
-            $totalSpent = (float) $customer->orders()->sum('total_price');
-            $lastOrderDate = $customer->orders()->latest('order_date')->value('order_date');
-            $recency = $lastOrderDate ? now()->diffInDays(\Carbon\Carbon::parse($lastOrderDate)) : 99999;
-
             $featureRow = [];
             foreach ($features as $f) {
-                switch ($f) {
-                    case 'recency':
-                        $featureRow[] = $recency;
-                        break;
-                    case 'frequency':
-                        $featureRow[] = $frequency;
-                        break;
-                    case 'monetary':
-                        $featureRow[] = $totalSpent;
-                        break;
-                    default:
-                        // additional features can be added here in future
-                        $featureRow[] = 0.0;
+                $value = 0.0;
+                // If attribute exists and is numeric, use it
+                if (array_key_exists($f, $customer->getAttributes())) {
+                    $attr = $customer->{$f};
+                    if (is_numeric($attr)) {
+                        $value = (float) $attr;
+                    }
+                } else {
+                    // If relation is loaded or present, and is countable, use count
+                    if ($customer->relationLoaded($f)) {
+                        $rel = $customer->{$f};
+                        if (is_array($rel) || $rel instanceof \Countable) {
+                            $value = (float) count($rel);
+                        }
+                    } elseif (method_exists($customer, $f)) {
+                        // If a relationship method exists, try to get a lightweight count
+                        try {
+                            $rel = $customer->{$f}();
+                            if (method_exists($rel, 'count')) {
+                                $value = (float) $rel->count();
+                            }
+                        } catch (\Throwable $e) {
+                            // ignore and leave value as 0.0
+                        }
+                    }
                 }
+                $featureRow[] = $value;
             }
 
             $raw[] = array_combine($features, $featureRow);
