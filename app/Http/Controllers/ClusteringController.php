@@ -64,6 +64,30 @@ class ClusteringController extends Controller
                 'seed' => $request->get('seed', null),
             ];
 
+            // debug: print options to terminal and to laravel log
+            try {
+                $out = json_encode($options, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                if ($out === false) {
+                    throw new \Exception('json_encode failed');
+                }
+            } catch (\Throwable $e) {
+                $out = print_r($options, true);
+            }
+
+            // Log to storage/logs
+            \Illuminate\Support\Facades\Log::debug('KMeans options: ' . $out);
+
+            // Try writing to stderr (should appear in terminal running artisan)
+            if (@file_put_contents('php://stderr', "KMeans options:\n" . $out . PHP_EOL) === false) {
+                // Fallback to STDOUT if available
+                if (defined('STDOUT')) {
+                    @fwrite(STDOUT, "KMeans options:\n" . $out . PHP_EOL);
+                } else {
+                    // Final fallback
+                    error_log("KMeans options: " . $out);
+                }
+            }
+
             // run analysis (service should return mapping, customerIds, centroids, etc.)
             $analysis = $kMeansService->analyze($options);
             if (!is_array($analysis) || empty($analysis['mapping']) || empty($analysis['customerIds'])) {
@@ -117,67 +141,66 @@ class ClusteringController extends Controller
             $allFrequency = [];
             $allSpending = [];
 
-            // Persist cluster members and accumulate sums
-            // clusterResult may be associative mapping (index => clusterNum) where index aligns with customerIds array
-            foreach ($clusterResult as $index => $clusterNum) {
-                // determine corresponding customer id
-                // support both mapping keyed by numeric index or keyed by customer id
-                if (array_key_exists($index, $customerIds)) {
-                    $custId = $customerIds[$index];
-                } else {
-                    // fallback: if mapping keys are actually customer IDs
-                    $custId = $index;
-                }
+            // Pastikan mapping valid
+if (empty($clusterResult)) {
+    // fallback: semua customer dianggap satu cluster (cluster 1)
+    $clusterResult = array_fill(0, Customer::count(), 1);
+    $customerIds = Customer::pluck('id')->toArray();
+}
 
-                $customer = Customer::find($custId);
-                if (!$customer) {
-                    // skip missing customers
-                    continue;
-                }
+// Persist cluster members and accumulate sums
+foreach ($clusterResult as $index => $clusterNum) {
+    // cari customer ID
+    if (isset($customerIds[$index])) {
+        $custId = $customerIds[$index];
+    } elseif (is_numeric($index)) {
+        $custId = (int)$index;
+    } else {
+        continue;
+    }
 
-                // normalize cluster number to 1..kValue for storage/display
-                $clusterNumInt = (int)$clusterNum;
-                if ($mappingIsZeroBased) {
-                    $displayCluster = $clusterNumInt + 1; // 0 -> 1, 1 -> 2, ...
-                } else {
-                    // assume mapping already 1-based but still ensure within range
-                    $displayCluster = max(1, min($kValue, $clusterNumInt));
-                }
+    $customer = Customer::find($custId);
+    if (!$customer) {
+        continue;
+    }
 
-                // compute customer metrics
-                $frequency = (int)$customer->orders()->count();
-                $totalSpent = (float)$customer->orders()->sum('total_price');
-                $last = $customer->orders()->latest('order_date')->value('order_date');
-                $recency = $last ? Carbon::now()->diffInDays(Carbon::parse($last)) : 99999;
+    // Normalisasi cluster number
+    $clusterNumInt = (int)$clusterNum;
+    $displayCluster = $mappingIsZeroBased ? $clusterNumInt + 1 : max(1, min($kValue, $clusterNumInt));
 
-                // create member record (be defensive about schema)
-                $memberData = [
-                    'cluster_id' => $cluster->id,
-                    'customer_id' => $customer->id,
-                    'frequency' => $frequency,
-                    'total_spent' => $totalSpent,
-                ];
-                if (Schema::hasColumn('cluster_members', 'cluster_number')) {
-                    $memberData['cluster_number'] = $displayCluster;
-                }
-                ClusterMember::create($memberData);
+    // Hitung metrik pelanggan
+    $frequency = (int)$customer->orders()->count();
+    $totalSpent = (float)$customer->orders()->sum('total_price');
+    $last = $customer->orders()->latest('order_date')->value('order_date');
+    $recency = $last ? Carbon::now()->diffInDays(Carbon::parse($last)) : 99999;
 
-                // update customer's cluster_id column (if exists on customers)
-                if (Schema::hasColumn('customers', 'cluster_id')) {
-                    $customer->update(['cluster_id' => $displayCluster]);
-                }
+    // Simpan ke cluster_members
+    $memberData = [
+        'cluster_id' => $cluster->id,
+        'customer_id' => $customer->id,
+        'frequency' => $frequency,
+        'total_spent' => $totalSpent,
+        'cluster_number' => $displayCluster,
+    ];
+    ClusterMember::create($memberData);
 
-                // accumulate sums into clusterStats keyed by displayCluster (1..k)
-                $clusterStats[$displayCluster]['count'] += 1;
-                $clusterStats[$displayCluster]['sum_recency'] += $recency;
-                $clusterStats[$displayCluster]['sum_frequency'] += $frequency;
-                $clusterStats[$displayCluster]['sum_spending'] += $totalSpent;
+    // update cluster_id di tabel customers (jika ada kolomnya)
+    if (Schema::hasColumn('customers', 'cluster_id')) {
+        $customer->update(['cluster_id' => $displayCluster]);
+    }
 
-                // push into global arrays
-                $allRecency[] = $recency;
-                $allFrequency[] = $frequency;
-                $allSpending[] = $totalSpent;
-            }
+    // Tambahkan ke statistik
+    $clusterStats[$displayCluster]['count']++;
+    $clusterStats[$displayCluster]['sum_recency'] += $recency;
+    $clusterStats[$displayCluster]['sum_frequency'] += $frequency;
+    $clusterStats[$displayCluster]['sum_spending'] += $totalSpent;
+
+    // Global arrays
+    $allRecency[] = $recency;
+    $allFrequency[] = $frequency;
+    $allSpending[] = $totalSpent;
+}
+
 
             // finalize averages for each cluster
             for ($i = 1; $i <= $kValue; $i++) {
@@ -271,7 +294,19 @@ class ClusteringController extends Controller
             }
             $cluster->labels = json_encode($labelsMap);
             $cluster->save();
+            try {
+                $clusterData = method_exists($cluster, 'toArray') ? $cluster->toArray() : (array) $cluster;
+                $out = json_encode($clusterData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                if ($out === false) {
+                    $out = print_r($clusterData, true);
+                }
+            } catch (\Throwable $e) {
+                $out = 'Failed to serialize cluster: ' . $e->getMessage();
+            }
 
+            // write to terminal (stderr) and laravel log
+            @file_put_contents('php://stderr', "Cluster created:\n" . $out . PHP_EOL);
+            \Illuminate\Support\Facades\Log::debug('Cluster created: ' . (is_string($out) ? $out : print_r($out, true)));
             return redirect('/clustering/results/' . $cluster->id)
                 ->with('success', 'Analisis K-Means berhasil dilakukan!');
         } catch (\Exception $e) {
@@ -282,86 +317,103 @@ class ClusteringController extends Controller
     /**
      * Show cluster results page.
      */
-    public function results(Cluster $cluster)
-    {
-        $cluster->load(['clusterMembers' => function ($query) {
-            $query->with('customer');
-        }]);
-
-        $statistics = [];
-        // decode stored description robustly
-        $stored = [];
-        if (is_string($cluster->description) && $cluster->description !== '') {
-            $stored = [];
-            if (is_string($cluster->description) && $cluster->description !== '') {
-                $stored = json_decode($cluster->description, true) ?: [];
-            } elseif (is_array($cluster->description)) {
-                $stored = $cluster->description;
-            }
-        } elseif (is_array($cluster->description)) {
-            $stored = $cluster->description;
-        }
-
-        // Ensure we iterate 1..k
-        for ($i = 1; $i <= $cluster->k_value; $i++) {
-            $members = $cluster->clusterMembers()->where('cluster_number', $i)->get();
-            $count = $members->count();
-
-            $avgFreq = $count ? $members->avg('frequency') : 0;
-            $avgSpending = $count ? $members->avg('total_spent') : 0;
-
-            // avg recency
-            $recencySum = 0;
-            foreach ($members as $m) {
-                $last = optional($m->customer->orders()->latest('order_date'))->value('order_date');
-                $recencySum += $last ? Carbon::now()->diffInDays(Carbon::parse($last)) : 99999;
-            }
-            $avgRecency = $count ? ($recencySum / $count) : 0;
-
-            $label = $stored[$i]['label'] ?? null;
-            $statistics[$i] = [
-                'count' => $count,
-                'avg_frequency' => round($avgFreq, 2),
-                'avg_spending' => round($avgSpending, 2),
-                'avg_recency' => round($avgRecency, 2),
-                'label' => $label,
-            ];
-        }
-
-        // grouped members for display (1..k)
-        $groupedMembers = [];
-        for ($i = 1; $i <= $cluster->k_value; $i++) {
-            $groupedMembers[$i] = $cluster->clusterMembers()->where('cluster_number', $i)->with('customer')->get();
-        }
-
-        // compute top product types per cluster
-        $productTypes = [];
-        for ($i = 1; $i <= $cluster->k_value; $i++) {
-            $members = $cluster->clusterMembers()->where('cluster_number', $i)->pluck('customer_id')->toArray();
-            if (empty($members)) {
-                $productTypes[$i] = [];
-                continue;
-            }
-            $typeCount = Order::whereIn('customer_id', $members)
-                ->selectRaw('product_type, COUNT(*) as count')
-                ->groupBy('product_type')
-                ->orderBy('count', 'desc')
-                ->get()
-                ->pluck('count', 'product_type')
-                ->toArray();
-
-            if (!empty($typeCount)) {
-                $total = array_sum($typeCount);
-                $productTypes[$i] = array_map(function ($count) use ($total) {
-                    return round(($count / $total) * 100, 2);
-                }, $typeCount);
-            } else {
-                $productTypes[$i] = [];
+public function results(Cluster $cluster)
+{
+    try {
+        // Defensive: sometimes route-model-binding may provide an empty model instance
+        // (e.g. when custom binding or middleware modified the parameter). If the
+        // injected $cluster has no attributes, attempt to re-fetch from DB using
+        // the route parameter to ensure we have a properly hydrated model.
+        $attrs = method_exists($cluster, 'getAttributes') ? $cluster->getAttributes() : null;
+        if (empty($attrs) || (is_array($attrs) && count($attrs) === 0)) {
+            $routeId = request()->route('cluster') ?? null;
+            if ($routeId) {
+                $fresh = Cluster::with('clusterMembers.customer')->find($routeId);
+                if ($fresh) {
+                    $cluster = $fresh;
+                }
             }
         }
-
-        return view('clustering.results', compact('cluster', 'statistics', 'groupedMembers', 'productTypes'));
+        $data = method_exists($cluster, 'toArray') ? $cluster->toArray() : (array) $cluster;
+        $out = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if ($out === false) {
+            $out = print_r($data, true);
+        }
+    } catch (\Throwable $e) {
+        $out = 'Failed to serialize cluster: ' . $e->getMessage();
     }
+
+    @file_put_contents('php://stderr', "Cluster debug:\n" . $out . PHP_EOL);
+    \Illuminate\Support\Facades\Log::debug('Cluster debug: ' . (is_string($out) ? $out : print_r($out, true)));
+    // Load relasi clusterMembers dan customer
+    $cluster->load(['clusterMembers.customer']);
+
+    // Ambil k_value
+    $k = (int) $cluster->k_value;
+
+    // Inisialisasi statistik
+    $statistics = [];
+
+    // Loop tiap cluster (1..k)
+    for ($i = 1; $i <= $k; $i++) {
+        $members = $cluster->clusterMembers->where('cluster_number', $i);
+        $count = $members->count();
+
+        // Hitung rata-rata
+        $avgFreq = $count ? $members->avg('frequency') : 0;
+        $avgSpending = $count ? $members->avg('total_spent') : 0;
+
+        // Hitung recency
+        $recencySum = 0;
+        foreach ($members as $m) {
+            $last = optional($m->customer->orders()->latest('order_date'))->value('order_date');
+            $recencySum += $last ? Carbon::now()->diffInDays(Carbon::parse($last)) : 99999;
+        }
+        $avgRecency = $count ? ($recencySum / $count) : 0;
+
+        $statistics[$i] = [
+            'count' => $count,
+            'avg_frequency' => round($avgFreq, 2),
+            'avg_spending' => round($avgSpending, 2),
+            'avg_recency' => round($avgRecency, 2),
+            'label' => 'Cluster ' . $i,
+        ];
+    }
+
+    // Kelompokkan member per cluster
+    $groupedMembers = [];
+    for ($i = 1; $i <= $k; $i++) {
+        $groupedMembers[$i] = $cluster->clusterMembers
+            ->where('cluster_number', $i)
+            ->values(); // reset key
+    }
+
+    // Hitung distribusi jenis produk per cluster
+    $productTypes = [];
+    for ($i = 1; $i <= $k; $i++) {
+        $members = $groupedMembers[$i]->pluck('customer_id')->toArray();
+        if (empty($members)) {
+            $productTypes[$i] = [];
+            continue;
+        }
+
+        $typeCount = Order::whereIn('customer_id', $members)
+            ->selectRaw('product_type, COUNT(*) as count')
+            ->groupBy('product_type')
+            ->orderBy('count', 'desc')
+            ->pluck('count', 'product_type')
+            ->toArray();
+
+        $total = array_sum($typeCount);
+        $productTypes[$i] = $total > 0
+            ? array_map(fn($c) => round(($c / $total) * 100, 2), $typeCount)
+            : [];
+    }
+
+    // ✅ return yang benar (hapus view() kedua)
+    return view('clustering.results', compact('cluster', 'statistics', 'groupedMembers', 'productTypes'));
+}
+
 
     public function history()
     {
@@ -457,12 +509,7 @@ class ClusteringController extends Controller
         try {
             $params = [];
             if (is_string($cluster->params) && $cluster->params !== '') {
-                $params = [];
-                if (is_string($cluster->params) && $cluster->params !== '') {
-                    $params = json_decode($cluster->params, true) ?: [];
-                } elseif (is_array($cluster->params)) {
-                    $params = $cluster->params ?: [];
-                }
+                $params = json_decode($cluster->params, true) ?: [];
             } elseif (is_array($cluster->params)) {
                 $params = $cluster->params ?: [];
             }
@@ -648,12 +695,7 @@ class ClusteringController extends Controller
 
         $labels = [];
         if (is_string($cluster->labels) && $cluster->labels !== '') {
-            $labels = [];
-            if (is_string($cluster->labels) && $cluster->labels !== '') {
-                $labels = json_decode($cluster->labels, true) ?: [];
-            } elseif (is_array($cluster->labels)) {
-                $labels = $cluster->labels ?: [];
-            }
+            $labels = json_decode($cluster->labels, true) ?: [];
         } elseif (is_array($cluster->labels)) {
             $labels = $cluster->labels ?: [];
         }

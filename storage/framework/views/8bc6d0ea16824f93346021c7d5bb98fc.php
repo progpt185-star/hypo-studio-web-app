@@ -21,6 +21,10 @@
 <?php $__env->stopSection(); ?>
 
 <?php $__env->startSection('content'); ?>
+<pre>
+<?php echo e(json_encode($statistics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?>
+
+</pre>
 <div class="container-fluid">
     <div class="row mb-4">
         <div class="col-md-6">
@@ -264,6 +268,20 @@
                 </div>
                 <div class="card-body">
                     <canvas id="spendingChart" height="80"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scatter plot: Frekuensi vs Total Spending -->
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom">
+                    <h5 class="mb-0"><i class="fas fa-chart-scatter"></i> Frekuensi VS Total Belanja</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="scatterChart" height="240"></canvas>
                 </div>
             </div>
         </div>
@@ -527,6 +545,87 @@
             }
         });
     <?php endfor; ?>
+
+    // Scatter plot: Frekuensi vs Total Spending
+    <?php
+        $scatterPoints = [];
+        foreach ($cluster->clusterMembers as $m) {
+            $scatterPoints[] = [
+                'x' => (float) ($m->frequency ?? 0),
+                'y' => (float) ($m->total_spent ?? 0),
+                'cluster' => (int) ($m->cluster_number ?? 0),
+                'label' => $m->customer->name ?? 'Customer ' . ($m->customer_id ?? '?'),
+            ];
+        }
+        // Generate color map for clusters
+        $colorMap = [];
+        for ($i = 1; $i <= $k; $i++) {
+            $h = (int) (($i * 47) % 360);
+            $colorMap[$i] = "hsl({$h},70%,40%)";
+        }
+    ?>
+
+    (function(){
+        var ctx = document.getElementById('scatterChart');
+        if (!ctx) return;
+        var points = <?php echo json_encode($scatterPoints, 15, 512) ?>;
+        var colors = <?php echo json_encode($colorMap, 15, 512) ?>;
+
+        // Prepare dataset: one dataset with per-point colors
+        var data = points.map(function(p){
+            return {
+                x: p.x,
+                y: p.y,
+                cluster: p.cluster,
+                label: p.label
+            };
+        });
+
+        var bgColors = points.map(function(p){
+            return colors[p.cluster] || 'rgba(54,162,235,0.8)';
+        });
+
+        var scatterCtx = document.getElementById('scatterChart').getContext('2d');
+        new Chart(scatterCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Pelanggan',
+                    data: data,
+                    backgroundColor: bgColors,
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    showLine: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                var p = ctx.raw || {};
+                                var name = p.label || '';
+                                return name + ' — Frekuensi: ' + p.x + ', Total: Rp ' + Number(p.y).toLocaleString();
+                            }
+                        }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Frekuensi' },
+                        beginAtZero: true
+                    },
+                    y: {
+                        title: { display: true, text: 'Total Belanja (Rp)' },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    })();
 
     // Label editing functionality
     document.addEventListener('DOMContentLoaded', function() {

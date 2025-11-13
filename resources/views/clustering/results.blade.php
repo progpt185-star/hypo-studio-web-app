@@ -19,10 +19,35 @@
         background-color: #0d6efd;
         color: white;
     }
+    /* Compact inline legend for cluster scatter */
+    #clusterLegend {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    #clusterLegend > div {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.86rem;
+        color: #333;
+        margin-left: 4px;
+    }
+    #clusterLegend > div span {
+        display: inline-block;
+        width: 18px;
+        height: 12px;
+        border-radius: 3px;
+        border: 1px solid rgba(0,0,0,0.08);
+    }
 </style>
 @endsection
 
 @section('content')
+<pre>
+{{ json_encode($statistics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}
+</pre>
 <div class="container-fluid">
     <div class="row mb-4">
         <div class="col-md-6">
@@ -278,6 +303,24 @@
         </div>
     </div>
 
+    <!-- Scatter: Frequency vs Total Spending + Legend -->
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-chart-scatter"></i> Scatter: Frekuensi vs Total Spending</h5>
+                    <div id="clusterLegend" class="d-flex gap-2 align-items-center"></div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <canvas id="scatterChart" height="160"></canvas>
+                    </div>
+                    <small class="text-muted">Setiap titik merepresentasikan 1 pelanggan. Warna menunjukkan kelompok.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Product Type Distribution -->
     <div class="row mt-4">
         @for ($i = 1; $i <= $cluster->k_value; $i++)
@@ -484,6 +527,115 @@
     @php
         $productTypeData = $productTypes ?? [];
     @endphp
+    
+    // Scatter chart data (Frequency vs Total Spending)
+    @php
+        $clusterMembers = $cluster->clusterMembers ?? collect();
+        // prepare points: x = frequency, y = total_spent, cluster = cluster_number, label = customer name
+        $scatterPoints = $clusterMembers->map(function($m){
+            return [
+                'x' => (float) ($m->frequency ?? 0),
+                'y' => (float) ($m->total_spent ?? 0),
+                'cluster' => (int) ($m->cluster_number ?? 0),
+                'label' => $m->customer->name ?? ''
+            ];
+        })->values()->toArray();
+
+        // counts per cluster (use string keys for safety)
+        $clusterCounts = $clusterMembers->groupBy(function($m){ return (int) ($m->cluster_number ?? 0); })->map->count()->toArray();
+
+        // deterministic HSL palette per cluster index 1..k
+        $k_val = max(1, (int) ($cluster->k_value ?? 1));
+        $clusterColors = [];
+        for ($i = 1; $i <= $k_val; $i++) {
+            $h = (int) ((($i - 1) * (360 / max(1, $k_val))) % 360);
+            $clusterColors[$i] = "hsl({$h}, 70%, 45%)";
+        }
+    @endphp
+
+    <script>
+        // Prepare scatter data and legend
+        var scatterPoints = @json($scatterPoints);
+        var clusterCounts = @json($clusterCounts);
+        var clusterColors = @json($clusterColors);
+
+        // Build per-point color array
+        var pointColors = scatterPoints.map(function(p){
+            var c = clusterColors[p.cluster] || 'rgba(128,128,128,0.6)';
+            // Convert hsl(...) to a semi-transparent value if needed
+            if (c.indexOf('hsl(') === 0) {
+                return c.replace(')', ', 0.85)').replace('hsl(', 'hsla(');
+            }
+            return c;
+        });
+
+        // Render legend into #clusterLegend
+        (function renderLegend(){
+            var legend = document.getElementById('clusterLegend');
+            if (!legend) return;
+            legend.innerHTML = '';
+            Object.keys(clusterColors).forEach(function(key){
+                var idx = parseInt(key, 10);
+                var color = clusterColors[key];
+                var count = (clusterCounts[idx] !== undefined) ? clusterCounts[idx] : 0;
+                var item = document.createElement('div');
+                item.className = 'd-flex align-items-center';
+                item.style.gap = '8px';
+                item.innerHTML = '<span style="display:inline-block;width:18px;height:12px;background:' + color + ';border-radius:3px;border:1px solid rgba(0,0,0,0.08);"></span>' +
+                                 '&nbsp;<small>Kelompok ' + idx + ' — <strong>' + count + '</strong></small>';
+                legend.appendChild(item);
+            });
+        })();
+
+        // Create scatter chart
+        (function(){
+            var ctx = document.getElementById('scatterChart');
+            if (!ctx) return;
+            var scatterConfig = {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Pelanggan',
+                        data: scatterPoints,
+                        backgroundColor: pointColors,
+                        borderColor: 'rgba(0,0,0,0.06)',
+                        pointRadius: 6,
+                        pointHoverRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Frekuensi (jumlah transaksi)' },
+                            beginAtZero: true
+                        },
+                        y: {
+                            title: { display: true, text: 'Total Spending (Rp)' },
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context){
+                                    var p = context.raw || {};
+                                    var label = p.label || '';
+                                    var x = p.x || 0;
+                                    var y = p.y || 0;
+                                    return (label ? (label + ': ') : '') + 'F=' + x + ', Total=Rp ' + Number(y).toLocaleString();
+                                }
+                            }
+                        },
+                        legend: { display: false }
+                    }
+                }
+            };
+
+            new Chart(ctx.getContext('2d'), scatterConfig);
+        })();
+    </script>
     @for ($i = 1; $i <= $k; $i++)
         @php
             $types = array_keys($productTypeData[$i] ?? []);
