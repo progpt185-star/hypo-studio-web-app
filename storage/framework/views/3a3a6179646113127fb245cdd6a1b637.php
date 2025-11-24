@@ -9,9 +9,14 @@
             </h1>
         </div>
         <div class="col-md-6 text-end">
-            <a href="<?php echo e(route('customers.create')); ?>" class="btn btn-primary">
-                <i class="fas fa-plus"></i> Tambah Pelanggan
-            </a>
+            <div class="d-inline-block">
+                <a href="<?php echo e(url('customers/import')); ?>" class="btn btn-outline-secondary me-2">
+                    <i class="fas fa-file-import"></i> Import Data Pelanggan
+                </a>
+                <a href="<?php echo e(route('customers.create')); ?>" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Tambah Pelanggan
+                </a>
+            </div>
         </div>
     </div>
 
@@ -38,6 +43,7 @@
                                 <th>Nama</th>
                                 <th>No. HP</th>
                                 <th>Email</th>
+                                <th>Alamat</th>
                                 <th width="12%">Total Pesanan</th>
                                 <th width="15%">Total Pembelian</th>
                                 <th width="15%">Aksi</th>
@@ -52,6 +58,7 @@
                     </td>
                                     <td><?php echo e($customer->phone); ?></td>
                                     <td><?php echo e($customer->email ?? '-'); ?></td>
+                                    <td><?php echo e($customer->address ?? '-'); ?></td>
                                     <td>
                         <span class="badge bg-info"><?php echo e($customer->total_orders); ?></span>
                     </td>

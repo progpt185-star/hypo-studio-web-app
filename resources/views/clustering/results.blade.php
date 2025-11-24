@@ -45,9 +45,6 @@
 @endsection
 
 @section('content')
-<pre>
-{{ json_encode($statistics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}
-</pre>
 <div class="container-fluid">
     <div class="row mb-4">
         <div class="col-md-6">
@@ -84,10 +81,9 @@
                 <div class="collapse mt-2" id="debugCluster">
                     <div class="card card-body">
                         <strong>Cluster (array):</strong>
-                        <pre class="small mb-0">{{ json_encode($cluster->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+                        {{-- <pre class="small mb-0">{{ json_encode($cluster->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre> --}}
                     </div>
                 </div>
-  --}}FoundException) --}} 
                 <a href="{{ url('/clustering/export/' . $cluster->id . '?format=xlsx') }}" class="btn btn-success">Export XLSX</a>
                 <a href="{{ url('/clustering/export/' . $cluster->id . '?format=csv') }}" class="btn btn-outline-secondary">Export CSV</a>
             

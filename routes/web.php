@@ -19,11 +19,16 @@ Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index']);
 
     // Customers
+    // Import customers (define before resource to avoid route parameter conflict)
+    Route::get('customers/import', [App\Http\Controllers\CustomerImportController::class, 'show'])->name('customers.import.form');
+    Route::post('customers/import', [App\Http\Controllers\CustomerImportController::class, 'import'])->name('customers.import');
     Route::resource('customers', CustomerController::class);
 
     // Orders
-    Route::resource('orders', OrderController::class);
+    // Import orders (define before resource to avoid route parameter conflicts)
+    Route::get('orders/import', function(){ return view('orders.import'); })->name('orders.import.form');
     Route::post('orders/import', [OrderController::class, 'import'])->name('orders.import');
+    Route::resource('orders', OrderController::class);
 
     // Clustering
     Route::get('clustering', [ClusteringController::class, 'index'])->name('clustering.index');

@@ -63,6 +63,38 @@
                             @enderror
                         </div>
 
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label for="color" class="form-label">Warna</label>
+                                <input type="text" class="form-control @error('color') is-invalid @enderror" 
+                                       id="color" name="color" placeholder="Contoh: White, Black" 
+                                       value="{{ old('color', $order->color ?? '') }}">
+                                @error('color')
+                                    <div class="invalid-feedback">{{ $message }}</div>
+                                @enderror
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="size" class="form-label">Ukuran</label>
+                                <input type="text" class="form-control @error('size') is-invalid @enderror" 
+                                       id="size" name="size" placeholder="Contoh: S, M, L" 
+                                       value="{{ old('size', $order->size ?? '') }}">
+                                @error('size')
+                                    <div class="invalid-feedback">{{ $message }}</div>
+                                @enderror
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="category" class="form-label">Kategori Lengan</label>
+                                <select class="form-select @error('category') is-invalid @enderror" id="category" name="category">
+                                    <option value="">Pilih</option>
+                                    <option value="lengan pendek" {{ old('category', $order->category ?? '') == 'lengan pendek' ? 'selected' : '' }}>Lengan pendek</option>
+                                    <option value="lengan panjang" {{ old('category', $order->category ?? '') == 'lengan panjang' ? 'selected' : '' }}>Lengan panjang</option>
+                                </select>
+                                @error('category')
+                                    <div class="invalid-feedback">{{ $message }}</div>
+                                @enderror
+                            </div>
+                        </div>
+
                         <div class="mb-3">
                             <label for="quantity" class="form-label">Jumlah <span class="text-danger">*</span></label>
                             <input type="number" class="form-control @error('quantity') is-invalid @enderror" 

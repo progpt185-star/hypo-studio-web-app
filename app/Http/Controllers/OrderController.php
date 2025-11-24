@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\Customer;
+use App\Models\Gudang;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Imports\OrdersImport;
 
 class OrderController extends Controller
 {
@@ -45,9 +48,33 @@ class OrderController extends Controller
             'product_type' => 'required|string|max:255',
             'quantity' => 'required|integer|min:1',
             'total_price' => 'required|numeric|min:0',
+            'color' => 'nullable|string|max:100',
+            'size' => 'nullable|string|max:50',
+            'category' => 'nullable|string|max:50',
         ])->validate();
 
-        Order::create($validated);
+        // If user is admin, attempt to check stock in Gudang
+        $user = $request->user();
+        if ($user && method_exists($user, 'isAdmin') && $user->isAdmin()) {
+            $gQuery = Gudang::query()->where('product_type', $validated['product_type']);
+            if (!empty($validated['color'])) $gQuery->where('color', $validated['color']);
+            if (!empty($validated['size'])) $gQuery->where('size', $validated['size']);
+            if (!empty($validated['category'])) $gQuery->where('category', $validated['category']);
+
+            $gudang = $gQuery->first();
+            if ($gudang) {
+                if ($gudang->qty < $validated['quantity']) {
+                    return redirect()->back()->withInput()->with('error', 'Stok tidak cukup di gudang. Tersedia: ' . $gudang->qty);
+                }
+            }
+        }
+
+        $order = Order::create($validated);
+
+        // Decrease stock if we found a matching gudang
+        if (isset($gudang) && $gudang instanceof Gudang) {
+            $gudang->decreaseQty((int) $validated['quantity']);
+        }
 
         return redirect()->route('orders.index')->with('success', 'Pesanan berhasil ditambahkan!');
     }
@@ -92,9 +119,13 @@ class OrderController extends Controller
         $validated = Validator::make($request->all(), [
             'file' => 'required|mimes:xlsx,xls,csv'
         ])->validate();
-
-        // Implementasi import Excel/CSV
-        // Menggunakan maatwebsite/excel
+        $file = $request->file('file');
+        try {
+            Excel::import(new OrdersImport(), $file);
+        } catch (\Exception $e) {
+            throw $e;
+            // return redirect()->route('orders.index')->with('error', 'Import gagal: ' . $e->getMessage());
+        }
 
         return redirect()->route('orders.index')->with('success', 'Data berhasil diimport!');
     }

@@ -65,28 +65,28 @@ class ClusteringController extends Controller
             ];
 
             // debug: print options to terminal and to laravel log
-            try {
-                $out = json_encode($options, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-                if ($out === false) {
-                    throw new \Exception('json_encode failed');
-                }
-            } catch (\Throwable $e) {
-                $out = print_r($options, true);
-            }
+            // try {
+            //     $out = json_encode($options, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            //     if ($out === false) {
+            //         throw new \Exception('json_encode failed');
+            //     }
+            // } catch (\Throwable $e) {
+            //     $out = print_r($options, true);
+            // }
 
-            // Log to storage/logs
-            \Illuminate\Support\Facades\Log::debug('KMeans options: ' . $out);
+            // // Log to storage/logs
+            // \Illuminate\Support\Facades\Log::debug('KMeans options: ' . $out);
 
-            // Try writing to stderr (should appear in terminal running artisan)
-            if (@file_put_contents('php://stderr', "KMeans options:\n" . $out . PHP_EOL) === false) {
-                // Fallback to STDOUT if available
-                if (defined('STDOUT')) {
-                    @fwrite(STDOUT, "KMeans options:\n" . $out . PHP_EOL);
-                } else {
-                    // Final fallback
-                    error_log("KMeans options: " . $out);
-                }
-            }
+            // // Try writing to stderr (should appear in terminal running artisan)
+            // if (@file_put_contents('php://stderr', "KMeans options:\n" . $out . PHP_EOL) === false) {
+            //     // Fallback to STDOUT if available
+            //     if (defined('STDOUT')) {
+            //         @fwrite(STDOUT, "KMeans options:\n" . $out . PHP_EOL);
+            //     } else {
+            //         // Final fallback
+            //         error_log("KMeans options: " . $out);
+            //     }
+            // }
 
             // run analysis (service should return mapping, customerIds, centroids, etc.)
             $analysis = $kMeansService->analyze($options);
@@ -305,8 +305,8 @@ foreach ($clusterResult as $index => $clusterNum) {
             }
 
             // write to terminal (stderr) and laravel log
-            @file_put_contents('php://stderr', "Cluster created:\n" . $out . PHP_EOL);
-            \Illuminate\Support\Facades\Log::debug('Cluster created: ' . (is_string($out) ? $out : print_r($out, true)));
+            // @file_put_contents('php://stderr', "Cluster created:\n" . $out . PHP_EOL);
+            // \Illuminate\Support\Facades\Log::debug('Cluster created: ' . (is_string($out) ? $out : print_r($out, true)));
             return redirect('/clustering/results/' . $cluster->id)
                 ->with('success', 'Analisis K-Means berhasil dilakukan!');
         } catch (\Exception $e) {
