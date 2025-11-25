@@ -345,30 +345,113 @@ public function results(Cluster $cluster)
 
     @file_put_contents('php://stderr', "Cluster debug:\n" . $out . PHP_EOL);
     \Illuminate\Support\Facades\Log::debug('Cluster debug: ' . (is_string($out) ? $out : print_r($out, true)));
-    // Load relasi clusterMembers dan customer
-    $cluster->load(['clusterMembers.customer']);
 
-    // Ambil k_value
+    // Read optional period filters from query params (YYYY-MM-DD)
+    $startDateStr = request()->get('start_date');
+    $endDateStr = request()->get('end_date');
+
+    // Compute all data used by the view (statistics, per-member rows, product types, time series)
+    $computed = $this->computeClusterViewData($cluster, $startDateStr, $endDateStr);
+
+    return view('clustering.results', array_merge(['cluster' => $cluster], $computed, [
+        'startDate' => $computed['startDate'] ?? null,
+        'endDate' => $computed['endDate'] ?? null,
+        'startDateStr' => $startDateStr,
+        'endDateStr' => $endDateStr,
+    ]));
+}
+
+/**
+ * Compute cluster view data with optional date filtering.
+ * Returns array with keys: statistics, groupedMembers, productTypes, membersMetrics, timeSeries, startDate, endDate
+ */
+private function computeClusterViewData(Cluster $cluster, $startDateStr = null, $endDateStr = null)
+{
+    // Parse dates; default to last 30 days when no date provided
+    try {
+        $startDate = $startDateStr ? Carbon::parse($startDateStr) : null;
+    } catch (\Throwable $e) {
+        $startDate = null;
+    }
+    try {
+        $endDate = $endDateStr ? Carbon::parse($endDateStr) : null;
+    } catch (\Throwable $e) {
+        $endDate = null;
+    }
+
+    if (!$startDate && !$endDate) {
+        $endDate = Carbon::now();
+        $startDate = Carbon::now()->subDays(29);
+    }
+    if ($startDate && !$endDate) {
+        $endDate = Carbon::now();
+    }
+    if (!$startDate && $endDate) {
+        $startDate = (clone $endDate)->subDays(29);
+    }
+
+    // ensure times
+    $startDate = $startDate ? $startDate->startOfDay() : null;
+    $endDate = $endDate ? $endDate->endOfDay() : null;
+
+    $cluster->load(['clusterMembers.customer']);
     $k = (int) $cluster->k_value;
 
-    // Inisialisasi statistik
     $statistics = [];
+    $groupedMembers = [];
+    $productTypes = [];
+    $membersMetrics = [];
 
-    // Loop tiap cluster (1..k)
     for ($i = 1; $i <= $k; $i++) {
         $members = $cluster->clusterMembers->where('cluster_number', $i);
+        $groupedMembers[$i] = $members->values();
+
         $count = $members->count();
 
-        // Hitung rata-rata
-        $avgFreq = $count ? $members->avg('frequency') : 0;
-        $avgSpending = $count ? $members->avg('total_spent') : 0;
-
-        // Hitung recency
         $recencySum = 0;
+        $sumFreq = 0;
+        $sumSpend = 0;
+
+        $memberIds = $members->pluck('customer_id')->toArray();
+
         foreach ($members as $m) {
-            $last = optional($m->customer->orders()->latest('order_date'))->value('order_date');
-            $recencySum += $last ? Carbon::now()->diffInDays(Carbon::parse($last)) : 99999;
+            $customer = $m->customer;
+            if (!$customer) continue;
+
+            // apply date filter to orders when calculating metrics for report
+            $ordersQuery = $customer->orders();
+            if ($startDate) {
+                $ordersQuery = $ordersQuery->where('order_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $ordersQuery = $ordersQuery->where('order_date', '<=', $endDate);
+            }
+
+            $frequency = (int)$ordersQuery->count();
+            $totalSpent = (float)$ordersQuery->sum('total_price');
+            $last = $customer->orders()
+                ->when($startDate, fn($q) => $q->where('order_date', '>=', $startDate))
+                ->when($endDate, fn($q) => $q->where('order_date', '<=', $endDate))
+                ->latest('order_date')
+                ->value('order_date');
+            $recency = $last ? Carbon::now()->diffInDays(Carbon::parse($last)) : 99999;
+
+            $membersMetrics[] = [
+                'cluster' => $i,
+                'customer_id' => $customer->id,
+                'name' => $customer->name ?? '',
+                'frequency' => $frequency,
+                'total_spent' => $totalSpent,
+                'last_order' => $last ? Carbon::parse($last)->toDateString() : null,
+            ];
+
+            $sumFreq += $frequency;
+            $sumSpend += $totalSpent;
+            $recencySum += $recency;
         }
+
+        $avgFreq = $count ? ($sumFreq / $count) : 0;
+        $avgSpending = $count ? ($sumSpend / $count) : 0;
         $avgRecency = $count ? ($recencySum / $count) : 0;
 
         $statistics[$i] = [
@@ -378,40 +461,63 @@ public function results(Cluster $cluster)
             'avg_recency' => round($avgRecency, 2),
             'label' => 'Cluster ' . $i,
         ];
-    }
 
-    // Kelompokkan member per cluster
-    $groupedMembers = [];
-    for ($i = 1; $i <= $k; $i++) {
-        $groupedMembers[$i] = $cluster->clusterMembers
-            ->where('cluster_number', $i)
-            ->values(); // reset key
-    }
-
-    // Hitung distribusi jenis produk per cluster
-    $productTypes = [];
-    for ($i = 1; $i <= $k; $i++) {
-        $members = $groupedMembers[$i]->pluck('customer_id')->toArray();
-        if (empty($members)) {
+        // product type distribution within date range
+        if (empty($memberIds)) {
             $productTypes[$i] = [];
-            continue;
+        } else {
+            $typeQuery = Order::whereIn('customer_id', $memberIds);
+            if ($startDate) $typeQuery = $typeQuery->where('order_date', '>=', $startDate);
+            if ($endDate) $typeQuery = $typeQuery->where('order_date', '<=', $endDate);
+            $typeCount = $typeQuery
+                ->selectRaw('product_type, COUNT(*) as count')
+                ->groupBy('product_type')
+                ->orderBy('count', 'desc')
+                ->pluck('count', 'product_type')
+                ->toArray();
+
+            $total = array_sum($typeCount);
+            $productTypes[$i] = $total > 0
+                ? array_map(fn($c) => round(($c / $total) * 100, 2), $typeCount)
+                : [];
+        }
+    }
+
+    // Build time-series per cluster (daily revenue)
+    $labels = [];
+    $timeSeries = ['labels' => [], 'datasets' => []];
+    if ($startDate && $endDate) {
+        $period = \Carbon\CarbonPeriod::create($startDate->toDateString(), $endDate->toDateString());
+        foreach ($period as $dt) {
+            $labels[] = $dt->toDateString();
         }
 
-        $typeCount = Order::whereIn('customer_id', $members)
-            ->selectRaw('product_type, COUNT(*) as count')
-            ->groupBy('product_type')
-            ->orderBy('count', 'desc')
-            ->pluck('count', 'product_type')
-            ->toArray();
-
-        $total = array_sum($typeCount);
-        $productTypes[$i] = $total > 0
-            ? array_map(fn($c) => round(($c / $total) * 100, 2), $typeCount)
-            : [];
+        for ($i = 1; $i <= $k; $i++) {
+            $members = $groupedMembers[$i]->pluck('customer_id')->toArray();
+            $data = [];
+            foreach ($labels as $date) {
+                if (empty($members)) {
+                    $data[] = 0;
+                    continue;
+                }
+                $dayStart = Carbon::parse($date)->startOfDay();
+                $dayEnd = Carbon::parse($date)->endOfDay();
+                $sum = Order::whereIn('customer_id', $members)
+                    ->where('order_date', '>=', $dayStart)
+                    ->where('order_date', '<=', $dayEnd)
+                    ->sum('total_price');
+                $data[] = (float)$sum;
+            }
+            $timeSeries['datasets'][] = [
+                'label' => 'Cluster ' . $i,
+                'data' => $data,
+            ];
+        }
     }
 
-    // ✅ return yang benar (hapus view() kedua)
-    return view('clustering.results', compact('cluster', 'statistics', 'groupedMembers', 'productTypes'));
+    $timeSeries['labels'] = $labels;
+
+    return compact('statistics', 'groupedMembers', 'productTypes', 'membersMetrics', 'timeSeries', 'startDate', 'endDate');
 }
 
 
@@ -451,7 +557,7 @@ public function results(Cluster $cluster)
         }
 
         $format = $request->get('format', 'xlsx');
-        $supported = ['csv', 'xlsx'];
+        $supported = ['csv', 'xlsx', 'pdf'];
         if (!in_array($format, $supported, true)) {
             if ($request->expectsJson()) {
                 return response()->json(['message' => 'Invalid format'], 400);
@@ -459,46 +565,61 @@ public function results(Cluster $cluster)
             return response('Invalid format', 400);
         }
 
-        $filename = 'cluster_' . $cluster->id . '.' . ($format === 'csv' ? 'csv' : 'xlsx');
+        // Accept optional period filters and compute data accordingly
+        $startDateStr = $request->get('start_date');
+        $endDateStr = $request->get('end_date');
+        $computed = $this->computeClusterViewData($cluster, $startDateStr, $endDateStr);
 
-        // CSV handling: in tests we stream the CSV manually to avoid Excel dependency
-        if ($format === 'csv') {
-            if (app()->runningUnitTests()) {
-                $export = new ClusterMembersExport($cluster);
-                $rows = $export->collection();
-                $headers = $export->headings();
+        $filename = 'cluster_' . $cluster->id . '.' . ($format === 'csv' ? 'csv' : ($format === 'pdf' ? 'pdf' : 'xlsx'));
 
-                $output = fopen('php://temp', 'w+');
-                if ($headers) {
-                    fputcsv($output, $headers);
-                }
-
-                foreach ($rows as $row) {
-                    // Ensure row is plain array
-                    if (is_object($row)) {
-                        $row = (array) $row;
-                    } elseif ($row instanceof \Illuminate\Support\Collection) {
-                        $row = $row->toArray();
-                    }
-                    fputcsv($output, $row);
-                }
-
-                rewind($output);
-                $csv = stream_get_contents($output);
-                fclose($output);
-
-                return response($csv)
-                    ->header('Content-Type', 'text/csv')
-                    ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
-            }
-
-            // Non-test mode: delegate to Maatwebsite Excel for CSV export
-            $response = Excel::download(new ClusterMembersExport($cluster), $filename, \Maatwebsite\Excel\Excel::CSV);
-            $response->headers->set('Content-Type', 'text/csv');
-            return $response;
+        // CSV/XLSX: build rows from membersMetrics
+        $headersRow = ['Cluster', 'Customer ID', 'Customer Name', 'Frequency', 'Total Spent', 'Last Order Date'];
+        $rows = [];
+        foreach ($computed['membersMetrics'] as $r) {
+            $rows[] = [
+                $r['cluster'],
+                $r['customer_id'],
+                $r['name'],
+                $r['frequency'],
+                $r['total_spent'],
+                $r['last_order'] ?? '',
+            ];
         }
 
-        // Default: xlsx download
+        if ($format === 'csv' || $format === 'xlsx') {
+            // Use an anonymous export class to supply rows and headings to Maatwebsite\Excel
+            $exportArray = array_merge([$headersRow], $rows);
+            $export = new class($exportArray) implements \Maatwebsite\Excel\Concerns\FromArray, \Maatwebsite\Excel\Concerns\WithHeadings {
+                private $rows;
+                public function __construct(array $rows) { $this->rows = $rows; }
+                public function array(): array { return array_slice($this->rows, 1); }
+                public function headings(): array { return $this->rows[0] ?? []; }
+            };
+            return Excel::download($export, $filename);
+        }
+
+        // PDF export: render a dedicated PDF view (re-using clustering.pdf)
+        if ($format === 'pdf') {
+            try {
+                $statistics = $computed['statistics'] ?? [];
+                $groupedMembers = $computed['groupedMembers'] ?? [];
+                $productTypes = $computed['productTypes'] ?? [];
+                $membersMetrics = $computed['membersMetrics'] ?? [];
+                $timeSeries = $computed['timeSeries'] ?? [];
+                $startDate = $computed['startDate'] ?? null;
+                $endDate = $computed['endDate'] ?? null;
+
+                $pdf = Pdf::loadView('clustering.pdf', compact('cluster', 'statistics', 'groupedMembers', 'productTypes', 'membersMetrics', 'timeSeries', 'startDate', 'endDate'));
+                return $pdf->download($filename);
+            } catch (\Throwable $e) {
+                if ($request->expectsJson()) {
+                    return response()->json(['message' => 'Failed to generate PDF', 'error' => $e->getMessage()], 500);
+                }
+                return back()->withErrors(['error' => 'Failed to generate PDF: ' . $e->getMessage()]);
+            }
+        }
+
+        // Fallback
         return Excel::download(new ClusterMembersExport($cluster), $filename);
 }
     /**

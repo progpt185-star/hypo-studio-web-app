@@ -84,14 +84,16 @@
                         {{-- <pre class="small mb-0">{{ json_encode($cluster->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre> --}}
                     </div>
                 </div>
-                <a href="{{ url('/clustering/export/' . $cluster->id . '?format=xlsx') }}" class="btn btn-success">Export XLSX</a>
-                <a href="{{ url('/clustering/export/' . $cluster->id . '?format=csv') }}" class="btn btn-outline-secondary">Export CSV</a>
-            
-            
-                {{-- fallback URL jika route bernama tidak ditemukan --}}
-                <a href="{{ url('/clustering/pdf/' . $cluster->id) }}" class="btn btn-outline-dark">Download PDF</a>
-            
-                {{-- fallback jika named route tidak ditemukan --}}
+                <form method="get" action="{{ url('/clustering/export/' . $cluster->id) }}" class="d-inline-block me-2">
+                    <div class="input-group input-group-sm">
+                        <input type="date" name="start_date" class="form-control form-control-sm" value="{{ $startDateStr ?? '' }}" />
+                        <input type="date" name="end_date" class="form-control form-control-sm" value="{{ $endDateStr ?? '' }}" />
+                        <button type="submit" name="format" value="xlsx" class="btn btn-success">Export XLSX</button>
+                        <button type="submit" name="format" value="csv" class="btn btn-outline-secondary">Export CSV</button>
+                        <button type="submit" name="format" value="pdf" class="btn btn-outline-dark">Download PDF</button>
+                    </div>
+                </form>
+
                 <a href="{{ url('/clustering/rerun/' . $cluster->id) }}" class="btn btn-warning">Rerun Analisis (simpan params)</a>
             
         </div>
@@ -298,6 +300,21 @@
             </div>
         </div>
     </div>
+
+    @if(!empty($timeSeries['labels']))
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom">
+                    <h5 class="mb-0"><i class="fas fa-chart-area"></i> Time-series Pendapatan per Kelompok</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="timeSeriesChart" height="120"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    @endif
 
     <!-- Scatter: Frequency vs Total Spending + Legend -->
     <div class="row mt-4">
@@ -630,6 +647,31 @@
             };
 
             new Chart(ctx.getContext('2d'), scatterConfig);
+        })();
+
+        // Time-series chart for revenue per cluster (if available)
+        (function(){
+            var ts = @json($timeSeries ?? []);
+            if (!ts || !ts.labels || !ts.datasets) return;
+            var labels = ts.labels;
+            var datasets = ts.datasets.map(function(d, idx){
+                var h = (idx * (360 / Math.max(1, @json($k_val ?? 1)))) % 360;
+                return {
+                    label: d.label || ('Cluster ' + (idx+1)),
+                    data: d.data || [],
+                    borderColor: 'hsl(' + h + ', 70%, 45%)',
+                    backgroundColor: 'hsla(' + h + ', 70%, 45%, 0.12)',
+                    fill: true,
+                    tension: 0.2
+                };
+            });
+            var ctxTs = document.getElementById('timeSeriesChart');
+            if (!ctxTs) return;
+            new Chart(ctxTs.getContext('2d'), {
+                type: 'line',
+                data: { labels: labels, datasets: datasets },
+                options: { responsive: true, maintainAspectRatio: true, interaction: { mode: 'nearest', intersect: false }, scales: { y: { beginAtZero: true } } }
+            });
         })();
     </script>
     @for ($i = 1; $i <= $k; $i++)
