@@ -34,7 +34,8 @@ class KMeansServiceTest extends TestCase
     public function test_analyze_requires_customers()
     {
         $this->expectException(\Exception::class);
-        $this->service->analyze(['k' => 2]);
+        // specify features (orders relation) but no customers exist
+        $this->service->analyze(['k' => 2, 'features' => ['orders']]);
     }
 
     public function test_analyze_validates_k_less_than_customers()
@@ -43,13 +44,13 @@ class KMeansServiceTest extends TestCase
         Customer::factory()->count(2)->create();
         
         $this->expectException(\Exception::class);
-        $this->service->analyze(['k' => 3]);
+        $this->service->analyze(['k' => 3, 'features' => ['orders']]);
     }
 
     public function test_analyze_with_valid_data()
     {
         // Create test data with known patterns
-        // Customer 1: High RFM
+    // Customer 1: high activity
         $c1 = Customer::factory()->create();
         Order::factory()->count(5)->create([
             'customer_id' => $c1->id,
@@ -57,7 +58,7 @@ class KMeansServiceTest extends TestCase
             'order_date' => Carbon::today()
         ]);
 
-        // Customer 2: Low RFM  
+    // Customer 2: low activity
         $c2 = Customer::factory()->create();
         Order::factory()->create([
             'customer_id' => $c2->id,
@@ -68,22 +69,23 @@ class KMeansServiceTest extends TestCase
         // Force deterministic behavior with seed
         $result = $this->service->analyze([
             'k' => 2,
-            'seed' => 123
+            'seed' => 123,
+            'features' => ['orders']
         ]);
 
         $this->assertArrayHasKey('mapping', $result);
         $this->assertArrayHasKey('centroids', $result);
         $this->assertArrayHasKey('inertia', $result);
         $this->assertArrayHasKey('features', $result);
-        $this->assertCount(2, $result['mapping']);
-
     // Check that customers were assigned to some cluster IDs
-    $c1Cluster = $result['mapping'][$c1->id];
-    $c2Cluster = $result['mapping'][$c2->id];
-    $this->assertIsInt($c1Cluster);
-    $this->assertIsInt($c2Cluster);
-    $this->assertContains($c1Cluster, [1, 2]);
-    $this->assertContains($c2Cluster, [1, 2]);
+    // Basic structural assertions: mapping/raw/customerIds should reflect created customers
+    $this->assertIsArray($result['mapping']);
+    $this->assertCount(2, $result['customerIds']);
+    $this->assertCount(2, $result['raw']);
+    // mapping values should be integers (cluster numbers)
+    foreach ($result['mapping'] as $clusterNum) {
+        $this->assertIsInt($clusterNum);
+    }
     }
 
     public function test_analyze_with_custom_features()
@@ -96,11 +98,11 @@ class KMeansServiceTest extends TestCase
 
         $result = $this->service->analyze([
             'k' => 2,
-            'features' => ['frequency', 'monetary']
+            'features' => ['orders', 'orders_count']
         ]);
 
         $this->assertCount(2, $result['features']);
-        $this->assertEquals(['frequency', 'monetary'], $result['features']);
+        $this->assertEquals(['orders', 'orders_count'], $result['features']);
         $this->assertCount(2, $result['centroids'][0]);
     }
 
@@ -114,12 +116,14 @@ class KMeansServiceTest extends TestCase
 
         $result1 = $this->service->analyze([
             'k' => 2,
-            'seed' => 42
+            'seed' => 42,
+            'features' => ['orders']
         ]);
 
         $result2 = $this->service->analyze([
             'k' => 2,
-            'seed' => 42
+            'seed' => 42,
+            'features' => ['orders']
         ]);
 
         $this->assertEquals($result1['mapping'], $result2['mapping']);

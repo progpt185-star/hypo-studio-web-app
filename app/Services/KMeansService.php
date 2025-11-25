@@ -3,300 +3,179 @@
 namespace App\Services;
 
 use App\Models\Customer;
-use Phpml\Clustering\KMeans;
+use Carbon\Carbon;
 
 class KMeansService
 {
-    protected Preprocessor $preprocessor;
-
-    public function __construct()
-    {
-        $this->preprocessor = new Preprocessor();
-    }
-
     /**
-     * Analyze customers and run KMeans clustering.
-     * Options:
-     *  - k: int (required)
-     *  - features: array of feature keys (default ['recency','frequency','monetary'])
-     *  - seed: int|null
-     *  - n_init: number of init runs (not used by php-ml KMeans but accepted)
-     *
-     * Returns array with mapping, centroids, inertia, raw features, params
+     * Analisis clustering dengan K-Means sederhana berdasarkan data pelanggan.
      */
-    public function analyze(array $options): array
+    public function analyze(array $options)
     {
-        $k = $options['k'] ?? null;
-            if (!$k || $k <= 1) {
-            throw new \InvalidArgumentException('Parameter k harus diberikan dan > 0');
+        $k = $options['k'] ?? 3;
+        $features = $options['features'] ?? ['orders'];
+
+        // Ambil semua pelanggan yang punya order
+        $customers = Customer::with('orders')->get()->filter(function ($c) {
+            return $c->orders->count() > 0;
+        });
+
+        if ($customers->count() < $k) {
+            throw new \Exception("Jumlah pelanggan (" . $customers->count() . ") kurang dari jumlah cluster (k=$k).");
         }
 
-        $features = $options['features'] ?? ['recency', 'frequency', 'monetary'];
-        $seed = $options['seed'] ?? null;
-
-        // Ambil data pelanggan
-        $customers = Customer::with('orders')->get();
-        if ($customers->isEmpty()) {
-            throw new \Exception('Data pelanggan tidak ada');
-        }
-
-        $raw = [];
+        // Siapkan dataset RFM (Recency, Frequency, Monetary)
+        $data = [];
         $customerIds = [];
 
-        foreach ($customers as $customer) {
-            // prepare base RFM
-            $frequency = (int) $customer->orders()->count();
-            $totalSpent = (float) $customer->orders()->sum('total_price');
-            $lastOrderDate = $customer->orders()->latest('order_date')->value('order_date');
-            $recency = $lastOrderDate ? now()->diffInDays(\Carbon\Carbon::parse($lastOrderDate)) : 99999;
+        foreach ($customers as $c) {
+            $lastOrder = $c->orders->max('order_date');
+            $recency = $lastOrder ? Carbon::parse($lastOrder)->diffInDays(Carbon::now()) : 9999;
+            $frequency = $c->orders->count();
+            $monetary = $c->orders->sum('total_price');
 
-            $featureRow = [];
-            foreach ($features as $f) {
-                switch ($f) {
-                    case 'recency':
-                        $featureRow[] = $recency;
-                        break;
-                    case 'frequency':
-                        $featureRow[] = $frequency;
-                        break;
-                    case 'monetary':
-                        $featureRow[] = $totalSpent;
-                        break;
-                    default:
-                        // additional features can be added here in future
-                        $featureRow[] = 0.0;
-                }
-            }
-
-            $raw[] = array_combine($features, $featureRow);
-            $customerIds[] = $customer->id;
+            $data[] = [$recency, $frequency, $monetary];
+            $customerIds[] = $c->id;
         }
 
-        if (count($raw) < $k) {
-            throw new \Exception('Jumlah pelanggan harus lebih besar atau sama dengan k');
-        }
+        // Normalisasi agar skala tiap fitur sama
+        $scaled = $this->minMaxNormalize($data);
 
-        // build numeric matrix
-        $matrix = [];
-        foreach ($raw as $row) {
-            $matrix[] = array_values($row);
-        }
+        // Jalankan algoritma K-Means
+        $clusters = $this->kmeans($scaled, $k);
 
-        // preprocessing (z-score)
-        $prep = $this->preprocessor->fitTransform($matrix);
-        $scaled = $prep['matrix'];
-        $scalingParams = $prep['params'];
-
-        // run KMeans
-        if ($seed !== null) {
-            // php-ml KMeans does not accept seed directly; set mt_srand for deterministic init
-            mt_srand((int) $seed);
-        }
-
-        // run KMeans (use internal deterministic implementation when seed provided)
-        // use deterministic internal kmeans with provided seed
-        $clusters = $this->runKMeans($scaled, $k, $seed ?? 0);
-
-        // compute centroids from clusters
-        $centroids = [];
-        foreach ($clusters as $clusterIdx => $clusterPoints) {
-            $centroid = [];
-            if (empty($clusterPoints)) {
-                $centroids[$clusterIdx] = [];
-                continue;
-            }
-            // get first point safely
-            $firstPoint = reset($clusterPoints);
-            if (!is_array($firstPoint)) {
-                $centroids[$clusterIdx] = [];
-                continue;
-            }
-            $cols = count($firstPoint);
-            for ($c = 0; $c < $cols; $c++) {
-                $sum = 0.0;
-                $countPts = 0;
-                foreach ($clusterPoints as $pt) {
-                    if (isset($pt[$c])) {
-                        $sum += $pt[$c];
-                        $countPts++;
-                    }
-                }
-                $centroid[$c] = $countPts > 0 ? $sum / $countPts : 0.0;
-            }
-            $centroids[$clusterIdx] = $centroid;
-        }
-
-        // mapping customer id -> cluster number (1..k)
+        // Buat mapping customer_id -> cluster_number
         $mapping = [];
-        foreach ($clusters as $clusterIdx => $clusterPoints) {
-            foreach ($clusterPoints as $pt) {
-                $index = $this->findRowIndex($scaled, $pt);
-                if ($index !== null) {
-                    $mapping[$customerIds[$index]] = $clusterIdx + 1;
-                }
-            }
+        foreach ($clusters['assignments'] as $index => $clusterNum) {
+            $mapping[$index] = $clusterNum; // biar controller bisa mapping sesuai urutan customerIds
         }
-
-        // compute inertia (sum squared distances to centroid)
-        $inertia = 0.0;
-        foreach ($clusters as $clusterIdx => $clusterPoints) {
-            $centroid = $centroids[$clusterIdx] ?? null;
-            if (empty($centroid)) continue;
-            foreach ($clusterPoints as $pt) {
-                $s = 0.0;
-                for ($i = 0; $i < count($pt); $i++) {
-                    $s += pow($pt[$i] - $centroid[$i], 2);
-                }
-                $inertia += $s;
-            }
-        }
-
-        // prepare centroids in original feature scale (inverse transform)
-        $centroids_original = [];
-        foreach ($centroids as $cent) {
-            if (empty($cent)) {
-                $centroids_original[] = [];
-                continue;
-            }
-            $orig = [];
-            foreach ($cent as $i => $v) {
-                $mean = $scalingParams['means'][$i] ?? 0.0;
-                $std = $scalingParams['stds'][$i] ?? 1.0;
-                $orig[] = $v * $std + $mean;
-            }
-            $centroids_original[] = $orig;
-        }
-
-        // round centroids for deterministic comparisons
-        $round = function ($arr) {
-            $res = [];
-            foreach ($arr as $i => $row) {
-                if (!is_array($row)) { $res[$i] = $row; continue; }
-                $resRow = [];
-                foreach ($row as $v) {
-                    if (is_numeric($v)) {
-                        $resRow[] = round($v, 6);
-                    } else {
-                        $resRow[] = $v;
-                    }
-                }
-                $res[$i] = $resRow;
-            }
-            return $res;
-        };
-
-        $centroids_original = $round($centroids_original);
-        $centroids = $round($centroids);
 
         return [
-            'mapping' => $mapping,
-            'raw' => $raw,
-            'customerIds' => $customerIds,
-            'k' => $k,
-            'centroids' => $centroids_original,
-            'centroids_scaled' => $centroids,
-            'inertia' => $inertia,
-            'scaling_params' => $scalingParams,
+            'mapping' => $mapping,          // index → cluster number
+            'customerIds' => $customerIds,  // urutan customer
+            'centroids' => $clusters['centroids'],
             'features' => $features,
+            'k' => $k,
+            'inertia' => $clusters['inertia'] ?? null,
         ];
     }
 
-    protected function findRowIndex(array $matrix, array $row)
+    /**
+     * Normalisasi data menggunakan Min-Max scaling
+     */
+    private function minMaxNormalize(array $data)
     {
-        $tol = 1e-6;
-        foreach ($matrix as $i => $r) {
-            if (!is_array($r) || count($r) !== count($row)) continue;
-            $match = true;
-            for ($j = 0; $j < count($r); $j++) {
-                if (abs((float)$r[$j] - (float)$row[$j]) > $tol) {
-                    $match = false;
-                    break;
-                }
+        $columns = count($data[0]);
+        $mins = array_fill(0, $columns, INF);
+        $maxs = array_fill(0, $columns, -INF);
+
+        foreach ($data as $row) {
+            for ($i = 0; $i < $columns; $i++) {
+                $mins[$i] = min($mins[$i], $row[$i]);
+                $maxs[$i] = max($maxs[$i], $row[$i]);
             }
-            if ($match) return $i;
         }
-        return null;
+
+        $normalized = [];
+        foreach ($data as $row) {
+            $scaled = [];
+            for ($i = 0; $i < $columns; $i++) {
+                $range = $maxs[$i] - $mins[$i];
+                $scaled[$i] = $range > 0 ? ($row[$i] - $mins[$i]) / $range : 0;
+            }
+            $normalized[] = $scaled;
+        }
+
+        return $normalized;
     }
 
     /**
-     * Simple deterministic KMeans implementation using mt_rand for initialization.
-     * Returns array of clusters where each cluster is an array of points.
+     * Implementasi K-Means clustering sederhana
      */
-    protected function runKMeans(array $matrix, int $k, int $seed = 0, int $maxIterations = 100, float $tol = 1e-6): array
+    private function kmeans(array $data, int $k, int $maxIterations = 100)
     {
-        $n = count($matrix);
-        if ($n === 0) return array_fill(0, $k, []);
-        $dims = count($matrix[0]);
-        // initialize deterministic RNG using simple LCG
-        $state = (int)$seed;
-        $lcg = function() use (&$state) {
-            // 32-bit LCG
-            $state = (int)((($state * 1664525) + 1013904223) & 0xFFFFFFFF);
-            return $state;
-        };
+        $numPoints = count($data);
+        $numFeatures = count($data[0]);
 
-        // initialize centroids by picking k unique pseudo-random points
-        $indices = [];
-        while (count($indices) < $k) {
-            $r = $lcg();
-            $idx = $n > 1 ? ($r % $n) : 0;
-            $indices[$idx] = true;
-            if (count($indices) > $n - 1) break; // safety
-        }
-        $indices = array_keys($indices);
-        // if not enough unique picks, fill with first points
-        for ($i = count($indices); $i < $k; $i++) {
-            $indices[] = $i % $n;
-        }
-
+        // Inisialisasi centroid acak
         $centroids = [];
-        foreach ($indices as $i) {
-            $centroids[] = $matrix[$i];
+        $usedIndexes = [];
+        while (count($centroids) < $k) {
+            $idx = rand(0, $numPoints - 1);
+            if (!in_array($idx, $usedIndexes)) {
+                $centroids[] = $data[$idx];
+                $usedIndexes[] = $idx;
+            }
         }
 
-        $clusters = [];
-    for ($iter = 0; $iter < $maxIterations; $iter++) {
-            // assign
-            $clusters = array_fill(0, $k, []);
-            for ($i = 0; $i < $n; $i++) {
-                $best = 0;
-                $bestDist = null;
-                for ($c = 0; $c < $k; $c++) {
-                    $d = 0.0;
-                    for ($j = 0; $j < $dims; $j++) {
-                        $d += pow($matrix[$i][$j] - $centroids[$c][$j], 2);
-                    }
-                    if ($bestDist === null || $d < $bestDist) {
-                        $bestDist = $d;
-                        $best = $c;
+        $assignments = array_fill(0, $numPoints, 0);
+
+        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+            $changed = false;
+
+            // Step 1: Assign ke centroid terdekat
+            for ($i = 0; $i < $numPoints; $i++) {
+                $minDist = INF;
+                $clusterIndex = 0;
+
+                foreach ($centroids as $ci => $centroid) {
+                    $dist = $this->euclideanDistance($data[$i], $centroid);
+                    if ($dist < $minDist) {
+                        $minDist = $dist;
+                        $clusterIndex = $ci;
                     }
                 }
-                $clusters[$best][] = $matrix[$i];
+
+                if ($assignments[$i] !== $clusterIndex) {
+                    $assignments[$i] = $clusterIndex;
+                    $changed = true;
+                }
             }
 
-            // update centroids
-            $moved = 0.0;
-            for ($c = 0; $c < $k; $c++) {
-                if (empty($clusters[$c])) continue;
-                $new = array_fill(0, $dims, 0.0);
-                foreach ($clusters[$c] as $pt) {
-                    for ($j = 0; $j < $dims; $j++) {
-                        $new[$j] += $pt[$j];
-                    }
+            // Step 2: Update centroid
+            $newCentroids = array_fill(0, $k, array_fill(0, $numFeatures, 0));
+            $counts = array_fill(0, $k, 0);
+
+            for ($i = 0; $i < $numPoints; $i++) {
+                $cluster = $assignments[$i];
+                for ($j = 0; $j < $numFeatures; $j++) {
+                    $newCentroids[$cluster][$j] += $data[$i][$j];
                 }
-                for ($j = 0; $j < $dims; $j++) {
-                    $new[$j] /= count($clusters[$c]);
-                }
-                // compute move
-                for ($j = 0; $j < $dims; $j++) {
-                    $moved += abs($new[$j] - $centroids[$c][$j]);
-                }
-                $centroids[$c] = $new;
+                $counts[$cluster]++;
             }
 
-            if ($moved <= $tol) break;
+            for ($ci = 0; $ci < $k; $ci++) {
+                if ($counts[$ci] > 0) {
+                    for ($j = 0; $j < $numFeatures; $j++) {
+                        $newCentroids[$ci][$j] /= $counts[$ci];
+                    }
+                } else {
+                    // Jika cluster kosong, isi centroid acak lagi
+                    $newCentroids[$ci] = $data[rand(0, $numPoints - 1)];
+                }
+            }
+
+            $centroids = $newCentroids;
+
+            // Berhenti kalau sudah konvergen
+            if (!$changed) break;
         }
 
-        return $clusters;
+        return [
+            'centroids' => $centroids,
+            'assignments' => $assignments
+        ];
+    }
+
+    /**
+     * Hitung jarak Euclidean
+     */
+    private function euclideanDistance(array $a, array $b)
+    {
+        $sum = 0;
+        for ($i = 0; $i < count($a); $i++) {
+            $sum += pow($a[$i] - $b[$i], 2);
+        }
+        return sqrt($sum);
     }
 }

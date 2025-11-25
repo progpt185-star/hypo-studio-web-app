@@ -19,7 +19,8 @@ class ClusterFactory extends Factory
             'created_by' => User::factory(),
             'analysis_date' => now(),
             'params' => json_encode([
-                'features' => ['recency', 'frequency', 'monetary'],
+                // Default features: use orders count as a reliable feature
+                'features' => ['orders'],
                 'seed' => $this->faker->randomNumber(),
             ]),
             'labels' => json_encode([]),

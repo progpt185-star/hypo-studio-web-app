@@ -19,6 +19,12 @@ class Kernel extends ConsoleKernel
      */
     protected function commands()
     {
-        // load commands if necessary
+        // Load custom Artisan commands from app/Console/Commands
+        $this->load(__DIR__ . '/Commands');
+
+        $consoleRoutes = base_path('routes/console.php');
+        if (file_exists($consoleRoutes)) {
+            require $consoleRoutes;
+        }
     }
 }

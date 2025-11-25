@@ -11,9 +11,14 @@
             </h1>
         </div>
         <div class="col-md-6 text-end">
-            <a href="{{ route('orders.create') }}" class="btn btn-primary">
-                <i class="fas fa-plus"></i> Tambah Pesanan
-            </a>
+            <div class="d-inline-block">
+                <a href="{{ url('orders/import') }}" class="btn btn-outline-secondary me-2">
+                    <i class="fas fa-file-import"></i> Import Data Pesanan
+                </a>
+                <a href="{{ route('orders.create') }}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Tambah Pesanan
+                </a>
+            </div>
         </div>
     </div>
 

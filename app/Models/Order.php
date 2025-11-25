@@ -13,6 +13,9 @@ class Order extends Model
         'customer_id',
         'order_date',
         'product_type',
+        'color',
+        'size',
+        'category',
         'quantity',
         'total_price'
     ];
